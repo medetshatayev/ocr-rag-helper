@@ -131,66 +131,95 @@ def display_chat_message(message: Dict, sources: List[Dict] = None):
                     st.markdown(f"""
                     <div class="source-info">
                         <strong>Source {i+1}:</strong> {Path(source['file']).name}<br>
-                        <strong>Page:</strong> {source.get('page', 'N/A')}<br>
-                        <strong>Type:</strong> {source.get('content_type', 'text')}<br>
-                        <strong>Similarity:</strong> {source.get('similarity_score', 0):.3f}
+                        <strong>Page:</strong> {source.get('page', 'N/A')}
                     </div>
                     """, unsafe_allow_html=True)
 
 def sidebar_content():
     """Render sidebar content."""
-    st.sidebar.title("RAG Assistant Settings")
-    
-    # API Key status
-    if st.session_state.api_key_valid:
-        st.sidebar.success("Azure OpenAI API key configured")
-    else:
-        st.sidebar.error("Azure OpenAI API key missing")
-    
-    st.sidebar.markdown("---")
     
     # Document Management
     st.sidebar.subheader("Document Management")
     
-    # Docs directory info
+    # Define and create Docs directory
     docs_dir = os.path.join(os.getcwd(), "Docs")
-    docs_exists = os.path.exists(docs_dir)
+    os.makedirs(docs_dir, exist_ok=True)
     
-    if docs_exists:
-        st.sidebar.success(f"**Docs Directory Found:**\n{docs_dir}")
+    # Supported file extensions for consistency
+    supported_extensions = ['.pdf', '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.yml', '.yaml']
+    uploader_types = [ext.lstrip('.') for ext in supported_extensions]
+
+    # File uploader
+    uploaded_files = st.sidebar.file_uploader(
+        "Upload Documents",
+        type=uploader_types,
+        accept_multiple_files=True,
+        help="Upload files to be indexed by the RAG system."
+    )
+
+    # State management for uploaded files to prevent re-saving
+    if "saved_file_ids" not in st.session_state:
+        st.session_state.saved_file_ids = set()
+
+    if uploaded_files:
+        new_files_to_save = []
+        current_file_ids = set()
         
-        # Show files in Docs directory
-        try:
-            doc_files = []
-            for file_path in Path(docs_dir).glob("**/*"):
-                if file_path.is_file() and file_path.suffix.lower() in ['.pdf', '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.yml', '.yaml']:
-                    doc_files.append(file_path.name)
+        for f in uploaded_files:
+            file_id = f"{f.name}-{f.size}"
+            current_file_ids.add(file_id)
+            if file_id not in st.session_state.saved_file_ids:
+                new_files_to_save.append(f)
+        
+        if new_files_to_save:
+            saved_count = 0
+            for uploaded_file in new_files_to_save:
+                try:
+                    file_path = os.path.join(docs_dir, uploaded_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    file_id = f"{uploaded_file.name}-{uploaded_file.size}"
+                    st.session_state.saved_file_ids.add(file_id)
+                    saved_count += 1
+                except Exception as e:
+                    st.sidebar.error(f"Error saving {uploaded_file.name}: {e}")
             
-            if doc_files:
-                st.sidebar.info(f"Found {len(doc_files)} document(s):\n• " + "\n• ".join(doc_files[:5]))
-                if len(doc_files) > 5:
-                    st.sidebar.info(f"... and {len(doc_files) - 5} more")
-            else:
-                st.sidebar.warning("No supported documents found in Docs folder")
-        except Exception as e:
-            st.sidebar.error(f"Error scanning Docs folder: {e}")
-    else:
-        st.sidebar.error(f"**Docs Directory Not Found:**\nPlease create a 'Docs' folder and add your documents")
-    
+            if saved_count > 0:
+                st.sidebar.success(f"Successfully saved {saved_count} file(s).")
+                # Rerun to update the file list below and button states
+                st.rerun()
+        
+        # Sync session state with uploader
+        st.session_state.saved_file_ids.intersection_update(current_file_ids)
+
+    # Show files in Docs directory
+    doc_files = []
+    try:
+        for file_path in Path(docs_dir).glob("**/*"):
+            if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+                doc_files.append(file_path.name)
+        
+        if not doc_files:
+            st.sidebar.warning("No supported documents found. Upload files to get started.")
+            
+    except Exception as e:
+        st.sidebar.error(f"Error scanning Docs folder: {e}")
+
     # Index documents button
     col1, col2 = st.sidebar.columns(2)
     
     with col1:
-        if st.button("Index Documents", use_container_width=True, disabled=not docs_exists):
-            if st.session_state.rag_system and docs_exists:
+        if st.button("Index Documents", use_container_width=True, disabled=not doc_files):
+            if st.session_state.rag_system:
                 with st.spinner("Indexing documents from Docs folder..."):
                     result = st.session_state.rag_system.index_directory(docs_dir)
                     st.session_state.indexing_status = result
                 st.rerun()
     
     with col2:
-        if st.button("Force Reindex", use_container_width=True, disabled=not docs_exists):
-            if st.session_state.rag_system and docs_exists:
+        if st.button("Force Reindex", use_container_width=True, disabled=not doc_files):
+            if st.session_state.rag_system:
                 with st.spinner("Force reindexing documents from Docs folder..."):
                     result = st.session_state.rag_system.index_directory(docs_dir, force_reindex=True)
                     st.session_state.indexing_status = result
@@ -217,14 +246,6 @@ def sidebar_content():
         if "error" not in stats:
             st.sidebar.write(f"**Total documents:** {stats.get('total_documents', 0)}")
             st.sidebar.write(f"**Unique sources:** {stats.get('unique_sources', 0)}")
-            st.sidebar.write(f"**Content types:** {len(stats.get('content_types', {}))}")
-            
-            # Content type breakdown
-            content_types = stats.get('content_types', {})
-            if content_types:
-                st.sidebar.write("**Content Types:**")
-                for content_type, count in content_types.items():
-                    st.sidebar.write(f"• {content_type}: {count}")
         else:
             st.sidebar.error("Error loading stats")
     

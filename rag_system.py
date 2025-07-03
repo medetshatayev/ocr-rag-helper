@@ -108,7 +108,15 @@ class RAGSystem:
         """Index all documents in a directory."""
         if force_reindex:
             logger.info("Force reindexing - clearing existing collection")
-            self.collection.delete()
+            try:
+                collection_name = self.collection.name
+                self.chroma_client.delete_collection(name=collection_name)
+                self.collection = self.chroma_client.create_collection(name=collection_name)
+                logger.info(f"Successfully cleared and recreated collection '{collection_name}'.")
+            except Exception as e:
+                logger.error(f"Error clearing collection for re-indexing: {e}")
+                return {"status": "error", "message": f"Failed to clear collection: {e}"}
+            
             self.document_processor.processed_files.clear()
         
         # Get file statistics
