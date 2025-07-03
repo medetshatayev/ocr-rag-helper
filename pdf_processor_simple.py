@@ -10,8 +10,9 @@ logger = logging.getLogger(__name__)
 class SimplePDFProcessor:
     """Simplified PDF processor using only pdfplumber - no PyMuPDF required."""
     
-    def __init__(self):
-        pass
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         
     def process_pdf(self, file_path: str) -> List[Dict]:
         """
@@ -136,9 +137,11 @@ class SimplePDFProcessor:
         
         return "\n".join(text_parts)
     
-    def _intelligent_text_split(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
+    def _intelligent_text_split(self, text: str) -> List[str]:
         """Split text intelligently, respecting paragraph and sentence boundaries."""
-        
+        chunk_size = self.chunk_size
+        overlap = self.chunk_overlap
+
         # First split by double newlines (paragraphs)
         paragraphs = text.split('\n\n')
         
@@ -152,10 +155,10 @@ class SimplePDFProcessor:
                 
                 # Start new chunk with overlap
                 overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
-                current_chunk = overlap_text + "\n\n" + paragraph
+                current_chunk = overlap_text + '\n\n' + paragraph
             else:
                 if current_chunk:
-                    current_chunk += "\n\n" + paragraph
+                    current_chunk += '\n\n' + paragraph
                 else:
                     current_chunk = paragraph
         

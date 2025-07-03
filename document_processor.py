@@ -19,7 +19,13 @@ class DocumentProcessor:
     """Main document processor that handles multiple file types."""
     
     def __init__(self):
-        self.pdf_processor = PDFProcessor()
+        self.chunk_size = int(os.getenv("CHUNK_SIZE", 1000))
+        self.chunk_overlap = int(os.getenv("CHUNK_OVERLAP", 200))
+        
+        self.pdf_processor = PDFProcessor(
+            chunk_size=self.chunk_size, 
+            chunk_overlap=self.chunk_overlap
+        )
         self.supported_extensions = {
             '.pdf', '.txt', '.md', '.py', '.js', '.html', '.css', 
             '.json', '.xml', '.csv', '.yml', '.yaml'
@@ -126,8 +132,11 @@ class DocumentProcessor:
         
         return chunks
     
-    def _split_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
+    def _split_text(self, text: str) -> List[str]:
         """Split text into overlapping chunks."""
+        chunk_size = self.chunk_size
+        overlap = self.chunk_overlap
+
         if len(text) <= chunk_size:
             return [text]
         
@@ -139,9 +148,10 @@ class DocumentProcessor:
             
             # Try to end at a sentence or paragraph boundary
             if end < len(text):
+                look_behind = int(chunk_size * 0.2)
                 # Look for sentence ending
-                for i in range(end, max(start + chunk_size - 200, start), -1):
-                    if text[i] in '.!?\n':
+                for i in range(end, max(start + chunk_size - look_behind, start), -1):
+                    if text[i] in '.!?\\n':
                         end = i + 1
                         break
             

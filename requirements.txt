@@ -8,6 +8,10 @@ chromadb>=0.4.24,<0.6.0
 
 # PDF Processing (using pdfplumber - stable and reliable)
 pdfplumber>=0.10.0,<1.0.0
+PyMuPDF>=1.24.0,<2.0.0
+
+# OCR and Image Processing
+pytesseract>=0.3.10
 
 # Data Processing
 pandas>=2.1.0,<3.0.0

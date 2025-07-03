@@ -4,7 +4,7 @@ from typing import List, Dict, Optional, Tuple
 import chromadb
 from chromadb.config import Settings
 import openai
-from openai import OpenAI
+from openai import AzureOpenAI
 from dotenv import load_dotenv
 
 from document_processor import DocumentProcessor
@@ -22,12 +22,16 @@ class RAGSystem:
         self.persist_directory = persist_directory
         self.document_processor = DocumentProcessor()
         
-        # Initialize OpenAI client
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Initialize Azure OpenAI client
+        self.openai_client = AzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        )
         
         # Configuration
-        self.embedding_model = "text-embedding-3-small"
-        self.chat_model = "gpt-4o"
+        self.embedding_model = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
+        self.chat_model = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
         self.max_retrieval_results = int(os.getenv("MAX_RETRIEVAL_RESULTS", "5"))
         
         # Initialize ChromaDB
@@ -43,9 +47,10 @@ class RAGSystem:
             try:
                 # Use PersistentClient with minimal settings for ChromaDB 0.5+
                 self.chroma_client = chromadb.PersistentClient(
-                    path=self.persist_directory
+                    path=self.persist_directory,
+                    settings=Settings(anonymized_telemetry=False)
                 )
-                logger.info("Initialized ChromaDB with PersistentClient")
+                logger.info("Initialized ChromaDB with PersistentClient, telemetry disabled")
                 
             except Exception as e1:
                 logger.warning(f"PersistentClient failed: {e1}")

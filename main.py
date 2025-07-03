@@ -3,8 +3,12 @@ import os
 import time
 from pathlib import Path
 from typing import List, Dict
+from dotenv import load_dotenv
 
 from rag_system import RAGSystem
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Page configuration
 st.set_page_config(
@@ -82,12 +86,15 @@ def initialize_session_state():
         st.session_state.api_key_valid = False
 
 def check_api_key():
-    """Check if OpenAI API key is configured."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "your_openai_api_key_here":
-        st.error("OpenAI API key not configured! Please set your OPENAI_API_KEY in the .env file.")
-        st.info("Create a .env file in your project directory with: OPENAI_API_KEY=your_actual_api_key")
+    """Check if Azure OpenAI API key is configured."""
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+
+    if not api_key or api_key == "your_api_key" or not endpoint:
+        st.error("Azure OpenAI credentials not configured!")
+        st.info("Please set your AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in the .env file.")
         return False
+    
     st.session_state.api_key_valid = True
     return True
 
@@ -136,9 +143,9 @@ def sidebar_content():
     
     # API Key status
     if st.session_state.api_key_valid:
-        st.sidebar.success("OpenAI API key configured")
+        st.sidebar.success("Azure OpenAI API key configured")
     else:
-        st.sidebar.error("OpenAI API key missing")
+        st.sidebar.error("Azure OpenAI API key missing")
     
     st.sidebar.markdown("---")
     
@@ -246,11 +253,11 @@ def main_chat_interface():
     
     # Check if system is ready
     if not st.session_state.api_key_valid:
-        st.warning("Please configure your OpenAI API key to start chatting.")
+        st.warning("Please configure your Azure OpenAI API key to start chatting.")
         return
     
     if not st.session_state.rag_system:
-        st.warning("RAG system not initialized. Please check the sidebar for errors.")
+        st.warning("RAG system not initialized. Please wait or check logs.")
         return
     
     # Check if documents are indexed
