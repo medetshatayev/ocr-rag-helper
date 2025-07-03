@@ -109,7 +109,7 @@ def initialize_rag_system():
         st.error(f"Failed to initialize RAG system: {str(e)}")
         return False
 
-def display_chat_message(message: Dict, sources: List[Dict] = None):
+def display_chat_message(message: Dict, message_index: int, sources: List[Dict] = None):
     """Display a chat message with styling."""
     is_user = message["role"] == "user"
     
@@ -128,12 +128,31 @@ def display_chat_message(message: Dict, sources: List[Dict] = None):
         if not is_user and sources:
             with st.expander("Sources", expanded=False):
                 for i, source in enumerate(sources):
+                    file_path = Path(source['file'])
+                    file_name = file_path.name
+                    
                     st.markdown(f"""
                     <div class="source-info">
-                        <strong>Source {i+1}:</strong> {Path(source['file']).name}<br>
+                        <strong>Source {i+1}:</strong> {file_name}<br>
                         <strong>Page:</strong> {source.get('page', 'N/A')}
                     </div>
                     """, unsafe_allow_html=True)
+
+                    # Add a download button for the source file
+                    if file_path.exists():
+                        try:
+                            with open(file_path, "rb") as fp:
+                                st.download_button(
+                                    label=f"Download {file_name}",
+                                    data=fp,
+                                    file_name=file_name,
+                                    mime=f"application/{file_path.suffix.lstrip('.')}",
+                                    key=f"download_{message_index}_{i}_{file_name}_{source.get('page', 'N/A')}"
+                                )
+                        except Exception as e:
+                            st.error(f"Could not read file for download: {e}")
+                    else:
+                        st.warning(f"Source file not found: {file_name}")
 
 def sidebar_content():
     """Render sidebar content."""
@@ -293,7 +312,7 @@ def main_chat_interface():
     with chat_container:
         for i, message in enumerate(st.session_state.chat_history):
             sources = message.get("sources", []) if message["role"] == "assistant" else None
-            display_chat_message(message, sources)
+            display_chat_message(message, i, sources)
     
     # Chat input using form to avoid session state conflicts
     with st.container():

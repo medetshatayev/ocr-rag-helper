@@ -234,8 +234,8 @@ class RAGSystem:
     
     def search_similar(self, query: str, n_results: int = None) -> List[Dict]:
         """Search for similar documents using vector similarity."""
-        if n_results is None:
-            n_results = self.max_retrieval_results
+        # The user wants to get 10 sources and then filter to the top 5
+        n_results_to_fetch = 10
         
         try:
             # Generate query embedding
@@ -248,26 +248,51 @@ class RAGSystem:
             # Search in ChromaDB
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=n_results,
-                include=['documents', 'metadatas', 'distances']
+                n_results=n_results_to_fetch,
+                include=["metadatas", "documents", "distances"] 
             )
             
-            # Format results
-            similar_docs = []
-            if results['documents'] and results['documents'][0]:
-                for i in range(len(results['documents'][0])):
-                    doc = {
-                        'content': results['documents'][0][i],
-                        'metadata': results['metadatas'][0][i],
-                        'similarity_score': 1 - results['distances'][0][i]  # Convert distance to similarity
-                    }
-                    similar_docs.append(doc)
+            if not results or not results.get('ids', [[]])[0]:
+                logger.info("No similar documents found in vector search.")
+                return []
             
-            logger.info(f"Found {len(similar_docs)} similar documents for query")
-            return similar_docs
+            # Extract and combine results with their distances (similarity scores)
+            combined_results = []
+            ids = results['ids'][0]
+            documents = results['documents'][0]
+            metadatas = results['metadatas'][0]
+            distances = results['distances'][0]
             
+            for i in range(len(ids)):
+                # Ensure metadata is a dictionary
+                metadata = metadatas[i] if isinstance(metadatas[i], dict) else {}
+                
+                combined_results.append({
+                    "id": ids[i],
+                    "document": documents[i],
+                    "metadata": metadata,
+                    "distance": distances[i]
+                })
+
+            # Sort by distance (lower is better) and take top 5
+            combined_results.sort(key=lambda x: x['distance'])
+            top_5_results = combined_results[:5]
+
+            # Format results for consumption
+            final_sources = []
+            for res in top_5_results:
+                source_info = {
+                    "file": res["metadata"].get("source", "Unknown"),
+                    "page": res["metadata"].get("page", None),
+                    "content": res["document"],
+                    "similarity_score": 1 - res["distance"]  # Convert distance to similarity
+                }
+                final_sources.append(source_info)
+                
+            return final_sources
+
         except Exception as e:
-            logger.error(f"Error searching similar documents: {str(e)}")
+            logger.error(f"Error during similarity search: {str(e)}")
             return []
     
     def generate_response(self, query: str, chat_history: List[Dict] = None) -> Dict:
@@ -288,22 +313,21 @@ class RAGSystem:
             sources = []
             
             for doc in relevant_docs:
-                context_parts.append(f"Source: {doc['metadata'].get('source', 'Unknown')}")
-                if 'page' in doc['metadata']:
-                    context_parts.append(f"Page: {doc['metadata']['page']}")
-                context_parts.append(f"Content: {doc['content']}")
-                context_parts.append("---")
+                source_file = doc['file']
+                page_num = doc['page']
+                file_name = os.path.basename(source_file)  # Extract just the filename
+                context_parts.append(f"Document {len(context_parts) + 1} (Source: {file_name}, Page: {page_num}):\n{doc['content']}")
                 
                 # Add to sources
                 source_info = {
-                    'file': doc['metadata'].get('source', 'Unknown'),
-                    'page': doc['metadata'].get('page'),
-                    'content_type': doc['metadata'].get('content_type', 'text'),
+                    'file': source_file,
+                    'page': page_num,
+                    'content_type': 'text',
                     'similarity_score': doc['similarity_score']
                 }
                 sources.append(source_info)
             
-            context = "\n".join(context_parts)
+            formatted_context = "\n\n".join(context_parts)
             
             # Prepare messages for OpenAI
             messages = [
@@ -327,7 +351,7 @@ INSTRUCTIONS:
             
             # Add current query with context
             user_message = f"""Context from indexed documents:
-{context}
+{formatted_context}
 
 Question: {query}
 
@@ -343,10 +367,23 @@ Please answer this question based on the provided context."""
                 max_tokens=1000
             )
             
-            answer = response.choices[0].message.content
+            assistant_response = response.choices[0].message.content
+            
+            # Format sources for display in the UI
+            sources = []
+            for doc in relevant_docs:
+                source_file = doc['file']
+                page_num = doc['page']
+                
+                sources.append({
+                    "file": source_file,
+                    "page": page_num,
+                    "content": doc['content'],
+                    "similarity_score": doc.get('similarity_score', 0.0)
+                })
             
             return {
-                "response": answer,
+                "response": assistant_response,
                 "sources": sources,
                 "context_used": True,
                 "retrieved_chunks": len(relevant_docs)
