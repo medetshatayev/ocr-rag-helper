@@ -1,6 +1,15 @@
 import os
 import logging
 from typing import List, Dict, Optional, Tuple
+
+# Patch for sqlite3 if pysqlite3-binary is installed
+try:
+    __import__('pysqlite3')
+    import sys
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    pass  # Will fall back to system sqlite3
+
 import chromadb
 from chromadb.config import Settings
 import openai
