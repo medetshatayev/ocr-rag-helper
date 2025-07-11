@@ -1,0 +1,23 @@
+services:
+  ocr_rag_api:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "5056:5056"
+    volumes:
+      - ./uploaded_files:/app/uploaded_files
+    container_name: ocr_rag_api
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ocr_rag_api.rule=Host(`yourdomain.com`)"
+      - "traefik.http.routers.ocr_rag_api.entrypoints=websecure"
+      - "traefik.http.routers.ocr_rag_api.tls=true"
+      - "traefik.http.services.ocr_rag_api.loadbalancer.server.port=5056"
+
+networks:
+  traefik_proxy:
+    external: true
