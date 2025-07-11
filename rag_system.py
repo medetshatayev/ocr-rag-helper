@@ -113,6 +113,29 @@ class RAGSystem:
                 logger.error(f"All initialization methods failed: {fallback_error}")
                 raise RuntimeError(f"Cannot initialize ChromaDB: {fallback_error}")
     
+    def index_file(self, file_path: str, document_id: str, original_filename: str) -> Dict:
+        """Process a single file and store it with a specific document_id."""
+        logger.info(f"Indexing file: {file_path} with document_id: {document_id}")
+        
+        # Process the single document, passing the original filename to be stored in metadata
+        chunks = self.document_processor.process_documents(
+            [file_path],
+            original_filename=original_filename
+        )
+        
+        if not chunks:
+            return {"status": "no_content", "message": "No content extracted from the file"}
+
+        # Generate embeddings and store
+        result = self._store_chunks(chunks, document_id)
+        
+        result.update({
+            "files_processed": 1,
+            "chunks_created": len(chunks)
+        })
+        
+        return result
+
     def index_directory(self, directory_path: str, force_reindex: bool = False) -> Dict:
         """Index all documents in a directory."""
         if force_reindex:
@@ -144,8 +167,12 @@ class RAGSystem:
         if not chunks:
             return {"status": "no_content", "message": "No content extracted from files"}
         
+        # This part is tricky as we don't have a single document_id for a directory.
+        # For now, we will assign a generic one.
+        # A better approach would be to have a document_id per file.
+        directory_document_id = f"dir_{os.path.basename(directory_path)}"
         # Generate embeddings and store
-        result = self._store_chunks(chunks)
+        result = self._store_chunks(chunks, directory_document_id)
         
         result.update({
             "files_processed": len(file_paths),
@@ -155,17 +182,12 @@ class RAGSystem:
         
         return result
     
-    def _store_chunks(self, chunks: List[Dict]) -> Dict:
+    def _store_chunks(self, chunks: List[Dict], document_id: str) -> Dict:
         """Generate embeddings and store chunks in vector database."""
         if not chunks:
             return {"status": "error", "message": "No chunks to store"}
         
         try:
-            # Prepare data for ChromaDB
-            documents = []
-            metadatas = []
-            ids = []
-            
             logger.info(f"Generating embeddings for {len(chunks)} chunks...")
             
             # Generate embeddings in batches
@@ -174,7 +196,6 @@ class RAGSystem:
                 batch_chunks = chunks[i:i + batch_size]
                 batch_texts = [chunk['content'] for chunk in batch_chunks]
                 
-                # Generate embeddings
                 response = self.openai_client.embeddings.create(
                     model=self.embedding_model,
                     input=batch_texts
@@ -182,49 +203,26 @@ class RAGSystem:
                 
                 batch_embeddings = [embedding.embedding for embedding in response.data]
                 
-                # Prepare batch data
-                for j, chunk in enumerate(batch_chunks):
-                    chunk_id = f"{chunk['metadata']['source']}_{chunk['metadata'].get('chunk_id', i+j)}"
-                    chunk_id = chunk_id.replace('\\', '/').replace(' ', '_')  # Clean ID
-                    
-                    documents.append(chunk['content'])
-                    metadatas.append(chunk['metadata'])
-                    ids.append(chunk_id)
-                
-                # Store batch in ChromaDB
                 batch_ids = []
                 batch_metadatas = []
                 
-                for j, chunk in enumerate(batch_chunks):
-                    # Create clean ID
-                    chunk_id = f"{chunk['metadata']['source']}_{chunk['metadata'].get('chunk_id', i+j)}"
-                    chunk_id = chunk_id.replace('\\', '/').replace(' ', '_').replace(':', '_')
-                    batch_ids.append(chunk_id)
+                for chunk in batch_chunks:
+                    chunk_id = f"{chunk['metadata'].get('source', 'unknown')}_{chunk['metadata'].get('chunk_id', 'unknown')}"
+                    batch_ids.append(chunk_id.replace('\\', '/').replace(' ', '_').replace(':', '_'))
                     
-                    # Clean metadata - remove any problematic keys
-                    clean_metadata = {}
-                    for key, value in chunk['metadata'].items():
-                        if isinstance(value, (str, int, float, bool)) and key != '_type':
-                            clean_metadata[key] = value
-                        elif isinstance(value, list):
-                            clean_metadata[key] = str(value)  # Convert lists to strings
-                    batch_metadatas.append(clean_metadata)
+                    metadata = chunk['metadata']
+                    metadata['document_id'] = document_id
+                    
+                    # Simple and safe sanitization
+                    sanitized_metadata = {k: str(v) for k, v in metadata.items()}
+                    batch_metadatas.append(sanitized_metadata)
                 
-                try:
-                    self.collection.add(
-                        documents=batch_texts,
-                        embeddings=batch_embeddings,
-                        metadatas=batch_metadatas,
-                        ids=batch_ids
-                    )
-                except Exception as e:
-                    # Fallback: try without embeddings (let ChromaDB generate them)
-                    logger.warning(f"Failed to add with embeddings, trying without: {e}")
-                    self.collection.add(
-                        documents=batch_texts,
-                        metadatas=batch_metadatas,
-                        ids=batch_ids
-                    )
+                self.collection.add(
+                    documents=batch_texts,
+                    embeddings=batch_embeddings,
+                    metadatas=batch_metadatas,
+                    ids=batch_ids
+                )
                 
                 logger.info(f"Stored batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
             
@@ -241,7 +239,7 @@ class RAGSystem:
             logger.error(f"Error storing chunks: {str(e)}")
             return {"status": "error", "message": f"Failed to store chunks: {str(e)}"}
     
-    def search_similar(self, query: str, n_results: int = None) -> List[Dict]:
+    def search_similar(self, query: str, document_id: str, n_results: int = None) -> List[Dict]:
         """Search for similar documents using vector similarity."""
         # The user wants to get 10 sources and then filter to the top 5
         n_results_to_fetch = 10
@@ -250,162 +248,98 @@ class RAGSystem:
             # Generate query embedding
             response = self.openai_client.embeddings.create(
                 model=self.embedding_model,
-                input=query
+                input=[query]
             )
             query_embedding = response.data[0].embedding
             
-            # Search in ChromaDB
+            # Query ChromaDB
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results_to_fetch,
-                include=["metadatas", "documents", "distances"] 
+                where={"document_id": document_id},
+                include=["metadatas", "documents", "distances"]
             )
             
             if not results or not results.get('ids', [[]])[0]:
                 logger.info("No similar documents found in vector search.")
                 return []
             
-            # Extract and combine results with their distances (similarity scores)
-            combined_results = []
-            ids = results['ids'][0]
-            documents = results['documents'][0]
-            metadatas = results['metadatas'][0]
-            distances = results['distances'][0]
-            
-            for i in range(len(ids)):
-                # Ensure metadata is a dictionary
-                metadata = metadatas[i] if isinstance(metadatas[i], dict) else {}
-                
-                combined_results.append({
-                    "id": ids[i],
-                    "document": documents[i],
-                    "metadata": metadata,
-                    "distance": distances[i]
+            # Process results safely
+            similar_chunks = []
+            for i in range(len(results['ids'][0])):
+                similar_chunks.append({
+                    "content": results['documents'][0][i],
+                    "metadata": results['metadatas'][0][i] or {},
+                    "distance": results['distances'][0][i]
                 })
 
-            # Sort by distance (lower is better) and take top 5
-            combined_results.sort(key=lambda x: x['distance'])
-            top_5_results = combined_results[:5]
-
-            # Format results for consumption
-            final_sources = []
-            for res in top_5_results:
-                source_info = {
-                    "file": res["metadata"].get("source", "Unknown"),
-                    "page": res["metadata"].get("page", None),
-                    "content": res["document"],
-                    "similarity_score": 1 - res["distance"]  # Convert distance to similarity
-                }
-                final_sources.append(source_info)
-                
-            return final_sources
+            similar_chunks.sort(key=lambda x: x.get('distance', -1))
+            return similar_chunks[:self.max_retrieval_results]
 
         except Exception as e:
             logger.error(f"Error during similarity search: {str(e)}")
             return []
     
-    def generate_response(self, query: str, chat_history: List[Dict] = None) -> Dict:
-        """Generate response using RAG pipeline."""
+    def generate_response(self, query: str, document_id: str, chat_history: List[Dict] = None) -> Dict:
+        """Generate a response using RAG."""
+        context_chunks = self.search_similar(query=query, document_id=document_id)
+        
+        if not context_chunks:
+            return {"answer": "I could not find any relevant information in the document to answer your question.", "sources": []}
+        
+        context = "\n\n---\n\n".join([chunk['content'] for chunk in context_chunks])
+        
+        # Create a system prompt
+        system_prompt = f"""
+You are an intelligent assistant designed to answer questions based on a provided document.
+Your task is to synthesize information from the 'DOCUMENT CONTEXT' section to answer the user's 'QUERY'.
+When you form your answer, you MUST adhere to the following rules:
+1.  Base your answer *exclusively* on the information found in the 'DOCUMENT CONTEXT'. Do not use any external knowledge or make assumptions.
+2.  If the context does not contain the answer, state clearly: "The provided document does not contain information on this topic."
+3.  Be concise and directly address the user's query.
+4.  Do not repeat the user's query in your response.
+5.  Include citations from the source document, referencing the page. For example: (page 3).
+
+DOCUMENT CONTEXT:
+---
+{context}
+---
+"""
+        
+        # Prepare conversation history
+        messages = [{"role": "system", "content": system_prompt}]
+        if chat_history:
+            messages.extend(chat_history)
+        messages.append({"role": "user", "content": f"QUERY: {query}"})
+
+        # 3. Generate the response
         try:
-            # Search for relevant documents
-            relevant_docs = self.search_similar(query)
-            
-            if not relevant_docs:
-                return {
-                    "response": "I couldn't find any relevant information in the indexed documents to answer your question.",
-                    "sources": [],
-                    "context_used": False
-                }
-            
-            # Prepare context from retrieved documents
-            context_parts = []
-            sources = []
-            
-            for doc in relevant_docs:
-                source_file = doc['file']
-                page_num = doc['page']
-                file_name = os.path.basename(source_file)  # Extract just the filename
-                context_parts.append(f"Document {len(context_parts) + 1} (Source: {file_name}, Page: {page_num}):\n{doc['content']}")
-                
-                # Add to sources
-                source_info = {
-                    'file': source_file,
-                    'page': page_num,
-                    'content_type': 'text',
-                    'similarity_score': doc['similarity_score']
-                }
-                sources.append(source_info)
-            
-            formatted_context = "\n\n".join(context_parts)
-            
-            # Prepare messages for OpenAI
-            messages = [
-                {
-                    "role": "system",
-                    "content": """You are a helpful assistant that answers questions based on the provided context from documents. 
-
-INSTRUCTIONS:
-1. Answer the user's question using ONLY the information provided in the context
-2. If the context doesn't contain enough information to answer the question, say so clearly
-3. Always cite the source (file name and page number when available) for your information
-4. If you find table data, present it in a clear, structured format
-5. Be precise and factual - don't make assumptions beyond what's in the context
-6. If multiple sources provide relevant information, reference all of them"""
-                }
-            ]
-            
-            # Add chat history if provided
-            if chat_history:
-                messages.extend(chat_history[-10:])  # Keep last 10 messages for context
-            
-            # Add current query with context
-            user_message = f"""Context from indexed documents:
-{formatted_context}
-
-Question: {query}
-
-Please answer this question based on the provided context."""
-            
-            messages.append({"role": "user", "content": user_message})
-            
-            # Generate response
+            logger.info("Generating response from OpenAI...")
             response = self.openai_client.chat.completions.create(
                 model=self.chat_model,
                 messages=messages,
-                temperature=0.1,  # Low temperature for factual responses
+                temperature=0.1,
                 max_tokens=1000
             )
             
-            assistant_response = response.choices[0].message.content
+            answer = response.choices[0].message.content
             
-            # Format sources for display in the UI
             sources = []
-            for doc in relevant_docs:
-                source_file = doc['file']
-                page_num = doc['page']
-                
-                sources.append({
-                    "file": source_file,
-                    "page": page_num,
-                    "content": doc['content'],
-                    "similarity_score": doc.get('similarity_score', 0.0)
-                })
+            for chunk in context_chunks:
+                metadata = chunk.get('metadata', {})
+                source_info = {
+                    'source': metadata.get('source', 'N/A'),
+                    'page': metadata.get('page', 'N/A'),
+                }
+                if source_info not in sources:
+                    sources.append(source_info)
             
-            return {
-                "response": assistant_response,
-                "sources": sources,
-                "context_used": True,
-                "retrieved_chunks": len(relevant_docs)
-            }
+            return {"answer": answer, "sources": sources}
             
         except Exception as e:
-            logger.error(f"Error generating response: {str(e)}")
-            return {
-                "response": f"I encountered an error while processing your question: {str(e)}",
-                "sources": [],
-                "context_used": False
-            }
-    
+            logger.error(f"Error generating response from OpenAI: {str(e)}")
+            return {"answer": "There was an error generating the response.", "sources": []}
+        
     def get_database_stats(self) -> Dict:
         """Get statistics about the vector database."""
         try:

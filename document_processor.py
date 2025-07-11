@@ -1,8 +1,9 @@
 import os
 import logging
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 from pathlib import Path
 import mimetypes
+import re
 
 try:
     from pdf_processor import PDFProcessor
@@ -54,7 +55,7 @@ class DocumentProcessor:
         logger.info(f"Found {len(files)} supported files in {directory_path}")
         return files
     
-    def process_documents(self, file_paths: List[str]) -> List[Dict]:
+    def process_documents(self, file_paths: List[str], original_filename: Optional[str] = None) -> List[Dict]:
         """Process multiple documents and return chunks with metadata."""
         all_chunks = []
         
@@ -63,6 +64,16 @@ class DocumentProcessor:
                 if file_path not in self.processed_files:
                     logger.info(f"Processing: {file_path}")
                     chunks = self._process_single_file(file_path)
+                    
+                    # This is the single point of truth for metadata enrichment.
+                    for chunk in chunks:
+                        # If an original filename is provided, use it as the source.
+                        if original_filename:
+                            chunk['metadata']['source'] = original_filename
+                        # Otherwise, ensure the source is the file path.
+                        else:
+                            chunk['metadata']['source'] = file_path
+
                     all_chunks.extend(chunks)
                     self.processed_files.add(file_path)
                 else:
