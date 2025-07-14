@@ -12,7 +12,7 @@ load_dotenv()
 
 # Page configuration
 st.set_page_config(
-    page_title="RAG Chat Assistant",
+    page_title="Farmon AI Agent",
     page_icon="💬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -67,6 +67,41 @@ st.markdown("""
     
     .chat-message span {
         color: #1f1f1f !important;
+    }
+
+    div[data-testid="stForm"] {
+        position: relative;
+    }
+
+    div[data-testid="stForm"] button {
+        border-radius: 50% !important;
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 20px !important;
+        background-color: #2196f3 !important;
+        color: white !important;
+        border: none !important;
+        position: absolute !important;
+        right: 10px;
+        top: 0;
+        bottom: 0;
+        margin-top: auto;
+        margin-bottom: auto;
+    }
+    
+    div[data-testid="stForm"] button:hover {
+        background-color: #1976d2 !important;
+    }
+
+    /* Add padding to the right of the input to make space for the button */
+    div[data-testid="stForm"] div[data-testid="stTextInput"] input {
+        padding-right: 60px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -126,15 +161,32 @@ def display_chat_message(message: Dict, message_index: int, sources: List[Dict] 
         
         # Display sources for assistant messages
         if not is_user and sources:
+            grouped_sources = {}
+            for source in sources:
+                source_file = source.get('source')
+                if not source_file:
+                    continue
+                
+                if source_file not in grouped_sources:
+                    grouped_sources[source_file] = {'pages': set()}
+                
+                page = source.get('page')
+                if page:
+                    grouped_sources[source_file]['pages'].add(page)
+
             with st.expander("Sources", expanded=False):
-                for i, source in enumerate(sources):
-                    file_path = Path(source['source'])
-                    file_name = file_path.name
+                unique_source_files = list(grouped_sources.items())[:5]
+
+                for i, (file_name, data) in enumerate(unique_source_files):
+                    file_path = Path(file_name)
+                    
+                    pages = sorted(list(data['pages']))
+                    pages_str = f"<strong>Page(s):</strong> {', '.join(map(str, pages))}" if pages else ""
                     
                     st.markdown(f"""
                     <div class="source-info">
-                        <strong>Source {i+1}:</strong> {file_name}<br>
-                        <strong>Page:</strong> {source.get('page', 'N/A')}
+                        <strong>Source {i+1}:</strong> {file_path.name}<br>
+                        {pages_str}
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -143,16 +195,16 @@ def display_chat_message(message: Dict, message_index: int, sources: List[Dict] 
                         try:
                             with open(file_path, "rb") as fp:
                                 st.download_button(
-                                    label=f"Download {file_name}",
+                                    label=f"Download {file_path.name}",
                                     data=fp,
-                                    file_name=file_name,
+                                    file_name=file_path.name,
                                     mime=f"application/{file_path.suffix.lstrip('.')}",
-                                    key=f"download_{message_index}_{i}_{file_name}_{source.get('page', 'N/A')}"
+                                    key=f"download_{message_index}_{i}_{file_path.name}"
                                 )
                         except Exception as e:
                             st.error(f"Could not read file for download: {e}")
                     else:
-                        st.warning(f"Source file not found: {file_name}")
+                        st.warning(f"Source file not found: {file_path.name}")
 
 def sidebar_content():
     """Render sidebar content."""
@@ -165,7 +217,8 @@ def sidebar_content():
     os.makedirs(docs_dir, exist_ok=True)
     
     # Supported file extensions for consistency
-    supported_extensions = ['.pdf', '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.yml', '.yaml']
+    supported_extensions = ['.pdf', '.txt', '.md', '.py', '.js', '.html', '.css', 
+                            '.json', '.xml', '.csv', '.yml', '.yaml']
     uploader_types = [ext.lstrip('.') for ext in supported_extensions]
 
     # File uploader
@@ -173,7 +226,7 @@ def sidebar_content():
         "Upload Documents",
         type=uploader_types,
         accept_multiple_files=True,
-        help="Upload files to be indexed by the RAG system."
+        help=f"Supported file types: {', '.join(ext.upper() for ext in supported_extensions)}"
     )
 
     # State management for uploaded files to prevent re-saving
@@ -206,7 +259,9 @@ def sidebar_content():
             
             if saved_count > 0:
                 st.sidebar.success(f"Successfully saved {saved_count} file(s).")
-                # Rerun to update the file list below and button states
+                with st.spinner("Indexing new documents..."):
+                    result = st.session_state.rag_system.index_directory(docs_dir)
+                st.session_state.indexing_status = result
                 st.rerun()
         
         # Sync session state with uploader
@@ -225,39 +280,18 @@ def sidebar_content():
     except Exception as e:
         st.sidebar.error(f"Error scanning Docs folder: {e}")
 
-    # Index documents button
-    col1, col2 = st.sidebar.columns(2)
-    
-    with col1:
-        if st.button("Index Documents", use_container_width=True, disabled=not doc_files):
-            if st.session_state.rag_system:
-                with st.spinner("Indexing documents from Docs folder..."):
-                    result = st.session_state.rag_system.index_directory(docs_dir)
-                    st.session_state.indexing_status = result
-                st.rerun()
-    
-    with col2:
-        if st.button("Force Reindex", use_container_width=True, disabled=not doc_files):
-            if st.session_state.rag_system:
-                with st.spinner("Force reindexing documents from Docs folder..."):
-                    result = st.session_state.rag_system.index_directory(docs_dir, force_reindex=True)
-                    st.session_state.indexing_status = result
-                st.rerun()
-    
     # Display indexing status
     if st.session_state.indexing_status:
         status = st.session_state.indexing_status
         if status["status"] == "success":
             st.sidebar.success(f"{status['message']}")
-            st.sidebar.info(f"Files processed: {status.get('files_processed', 0)}")
-            st.sidebar.info(f"Chunks created: {status.get('chunks_created', 0)}")
         else:
             st.sidebar.error(f"{status['message']}")
     
     st.sidebar.markdown("---")
     
     # Database Statistics
-    st.sidebar.subheader("Database Stats")
+    st.sidebar.subheader("Library Stats")
     
     if st.session_state.rag_system:
         stats = st.session_state.rag_system.get_database_stats()
@@ -277,19 +311,30 @@ def sidebar_content():
         st.session_state.chat_history = []
         st.rerun()
     
-    if st.sidebar.button("Clear Database", use_container_width=True):
+    if st.sidebar.button("Clear Library", use_container_width=True):
         if st.session_state.rag_system:
-            result = st.session_state.rag_system.clear_database()
-            if result["status"] == "success":
-                st.sidebar.success("Database cleared!")
+            # Clear database
+            db_clear_result = st.session_state.rag_system.clear_database()
+            if db_clear_result["status"] == "success":
+                st.sidebar.success("Library database cleared!")
                 st.session_state.indexing_status = None
             else:
-                st.sidebar.error(f"Error: {result['message']}")
+                st.sidebar.error(f"Error clearing database: {db_clear_result['message']}")
+            
+            # Clear Docs folder
+            docs_clear_result = st.session_state.rag_system.clear_docs_folder(docs_dir)
+            if docs_clear_result["status"] == "success":
+                st.sidebar.success("Source files deleted!")
+                # Reset saved file IDs to allow re-uploading
+                st.session_state.saved_file_ids = set()
+            else:
+                st.sidebar.error(f"Error deleting files: {docs_clear_result['message']}")
+        
         st.rerun()
 
 def main_chat_interface():
     """Main chat interface."""
-    st.markdown('<h1 class="main-header">RAG Chat Assistant</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Farmon AI Agent</h1>', unsafe_allow_html=True)
     
     # Check if system is ready
     if not st.session_state.api_key_valid:
@@ -303,7 +348,7 @@ def main_chat_interface():
     # Check if documents are indexed
     stats = st.session_state.rag_system.get_database_stats()
     if stats.get('total_documents', 0) == 0:
-        st.info("No documents indexed yet. Use the 'Index Documents' button in the sidebar to index documents from your 'Docs' folder.")
+        st.info("No documents found, upload new file to start")
         return
     
     # Display chat history
@@ -323,19 +368,14 @@ def main_chat_interface():
             st.session_state.input_counter = 0
         
         with st.form("chat_form", clear_on_submit=True):
-            # Create columns for input and button
-            col1, col2 = st.columns([4, 1])
+            user_input = st.text_input(
+                "Ask a question about your documents:",
+                placeholder="What would you like to know?",
+                label_visibility="collapsed",
+                key=f"user_input_{st.session_state.input_counter}"
+            )
             
-            with col1:
-                user_input = st.text_input(
-                    "Ask a question about your documents:",
-                    placeholder="What would you like to know?",
-                    label_visibility="collapsed",
-                    key=f"user_input_{st.session_state.input_counter}"
-                )
-            
-            with col2:
-                send_button = st.form_submit_button("Send", use_container_width=True)
+            send_button = st.form_submit_button("↑")
             
             # Process user input
             if send_button and user_input.strip():

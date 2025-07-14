@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Optional, Tuple
+from pathlib import Path
 
 # Patch for sqlite3 if pysqlite3-binary is installed
 try:
@@ -378,7 +379,7 @@ DOCUMENT CONTEXT:
             logger.error(f"Error getting database stats: {str(e)}")
             return {"error": str(e)}
     
-    def clear_database(self):
+    def clear_database(self) -> Dict:
         """Clear all documents from the database."""
         try:
             # Get all document IDs and delete them
@@ -406,6 +407,18 @@ DOCUMENT CONTEXT:
                 logger.error(f"Error clearing database: {str(e2)}")
                 return {"status": "error", "message": str(e2)}
     
+    def clear_docs_folder(self, docs_dir: str) -> Dict:
+        """Deletes all files in the specified directory."""
+        try:
+            for file_path in Path(docs_dir).glob("**/*"):
+                if file_path.is_file():
+                    file_path.unlink()
+            logger.info(f"All files in '{docs_dir}' have been deleted.")
+            return {"status": "success", "message": f"All files in '{docs_dir}' have been deleted."}
+        except Exception as e:
+            logger.error(f"Error deleting files from '{docs_dir}': {e}")
+            return {"status": "error", "message": str(e)}
+
     def reset_database(self):
         """Reset the entire database connection."""
         try:
