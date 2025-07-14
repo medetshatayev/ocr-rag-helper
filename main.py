@@ -128,7 +128,7 @@ def display_chat_message(message: Dict, message_index: int, sources: List[Dict] 
         if not is_user and sources:
             with st.expander("Sources", expanded=False):
                 for i, source in enumerate(sources):
-                    file_path = Path(source['file'])
+                    file_path = Path(source['source'])
                     file_name = file_path.name
                     
                     st.markdown(f"""
@@ -360,14 +360,15 @@ def main_chat_interface():
                             })
                     
                     response_data = st.session_state.rag_system.generate_response(
-                        user_input, 
-                        chat_context[:-1]  # Exclude current message
+                        query=user_input,
+                        document_id="dir_Docs",
+                        chat_history=chat_context[:-1]  # Exclude current message
                     )
                 
                 # Add assistant response to history
                 assistant_message = {
                     "role": "assistant",
-                    "content": response_data["response"],
+                    "content": response_data["answer"],
                     "sources": response_data.get("sources", [])
                 }
                 st.session_state.chat_history.append(assistant_message)

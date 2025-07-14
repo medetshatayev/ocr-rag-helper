@@ -13,10 +13,31 @@ services:
       - traefik_proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ocr_rag_api.rule=Host(`yourdomain.com`)"
+      - "traefik.http.routers.ocr_rag_api.rule=Host(`api.yourdomain.com`)"
       - "traefik.http.routers.ocr_rag_api.entrypoints=websecure"
       - "traefik.http.routers.ocr_rag_api.tls=true"
       - "traefik.http.services.ocr_rag_api.loadbalancer.server.port=5056"
+
+  ocr_rag_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./uploaded_files:/app/uploaded_files
+    container_name: ocr_rag_ui
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ocr_rag_ui.rule=Host(`yourdomain.com`)"
+      - "traefik.http.routers.ocr_rag_ui.entrypoints=websecure"
+      - "traefik.http.routers.ocr_rag_ui.tls=true"
+      - "traefik.http.services.ocr_rag_ui.loadbalancer.server.port=8501"
 
 networks:
   traefik_proxy:
