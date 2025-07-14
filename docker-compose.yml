@@ -15,3 +15,7 @@ services:
       - "traefik.http.routers.ocr_rag_ui.entrypoints=websecure"
       - "traefik.http.routers.ocr_rag_ui.tls=true"
       - "traefik.http.services.ocr_rag_ui.loadbalancer.server.port=8501"
+      - "traefik.http.services.ocr_rag_ui.loadbalancer.healthcheck.path=/healthz"
+      - "traefik.http.services.ocr_rag_ui.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.services.ocr_rag_ui.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.services.ocr_rag_ui.loadbalancer.healthcheck.scheme=http"
