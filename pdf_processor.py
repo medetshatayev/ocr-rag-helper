@@ -85,6 +85,22 @@ class PDFProcessor:
                 if table and len(table) > 1:  # Ensure table has header + data
                     # Convert table to DataFrame for better handling
                     df = pd.DataFrame(table[1:], columns=table[0])
+
+                    # --- Deduplicate duplicate column headers ---
+                    # If multiple columns share the same header, append _1, _2, ... to make them unique.
+                    def _dedup_columns(columns):
+                        seen = {}
+                        new_cols = []
+                        for col in columns:
+                            if col in seen:
+                                seen[col] += 1
+                                new_cols.append(f"{col}_{seen[col]}")
+                            else:
+                                seen[col] = 0
+                                new_cols.append(col)
+                        return new_cols
+
+                    df.columns = _dedup_columns(df.columns)
                     
                     # Create markdown representation
                     table_markdown = self._table_to_markdown(df)

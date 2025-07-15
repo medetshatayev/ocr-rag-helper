@@ -6,7 +6,7 @@ app = FastAPI(title="Document RAG API")
 # Set up CORS middleware to allow requests from the frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # The origin of the Next.js app
+    allow_origins=["*"],  # Allow all origins to avoid CORS issues
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
