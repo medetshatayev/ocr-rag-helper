@@ -221,11 +221,16 @@ def sidebar_content():
                             '.json', '.xml', '.csv', '.yml', '.yaml']
     uploader_types = [ext.lstrip('.') for ext in supported_extensions]
 
-    # File uploader
+    # Initialize dynamic key to reset uploader
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
+    # File uploader – key changes whenever we increment uploader_key, clearing previous selection
     uploaded_files = st.sidebar.file_uploader(
         "Upload Documents",
         type=uploader_types,
         accept_multiple_files=True,
+        key=f"docs_uploader_{st.session_state.uploader_key}",
         help=f"Supported file types: {', '.join(ext.upper() for ext in supported_extensions)}"
     )
 
@@ -262,23 +267,15 @@ def sidebar_content():
                 with st.spinner("Processing new document..."):
                     result = st.session_state.rag_system.index_directory(docs_dir)
                 st.session_state.indexing_status = result
+                # Increment key to reset uploader widget on next run
+                st.session_state.uploader_key += 1
                 st.rerun()
         
         # Sync session state with uploader
         st.session_state.saved_file_ids.intersection_update(current_file_ids)
 
-    # Show files in Docs directory
-    doc_files = []
-    try:
-        for file_path in Path(docs_dir).glob("**/*"):
-            if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
-                doc_files.append(file_path.name)
-        
-        if not doc_files:
-            st.sidebar.warning("No supported documents found. Upload files to get started.")
-            
-    except Exception as e:
-        st.sidebar.error(f"Error scanning Docs folder: {e}")
+    # (Optional) Skip displaying the list of stored documents—they are tracked internally
+    # If you wish to restore the file listing, re-enable the block below.
 
     # Display indexing status: show errors only, suppress success message
     if st.session_state.indexing_status:

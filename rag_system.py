@@ -44,6 +44,9 @@ class RAGSystem:
         self.embedding_model = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
         self.chat_model = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
         self.max_retrieval_results = int(os.getenv("MAX_RETRIEVAL_RESULTS", "5"))
+        # Threshold for maximum cosine distance (lower = more similar). Chunks with higher distance are ignored.
+        # Typical cosine-distance of 0.3–0.4 works well; make it configurable.
+        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
         
         # Initialize ChromaDB
         self._init_vector_db()
@@ -281,13 +284,26 @@ class RAGSystem:
             # Process results safely
             similar_chunks = []
             for i in range(len(results['ids'][0])):
-                similar_chunks.append({
-                    "content": results['documents'][0][i],
-                    "metadata": results['metadatas'][0][i] or {},
-                    "distance": results['distances'][0][i]
-                })
+                distance = results['distances'][0][i]
+                if distance <= self.similarity_threshold:
+                    similar_chunks.append({
+                        "content": results['documents'][0][i],
+                        "metadata": results['metadatas'][0][i] or {},
+                        "distance": distance
+                    })
 
-            similar_chunks.sort(key=lambda x: x.get('distance', -1))
+            # If nothing met the threshold, fall back to unfiltered results
+            if not similar_chunks:
+                for i in range(len(results['ids'][0])):
+                    similar_chunks.append({
+                        "content": results['documents'][0][i],
+                        "metadata": results['metadatas'][0][i] or {},
+                        "distance": results['distances'][0][i]
+                    })
+
+            # Sort by distance and limit to max results
+            similar_chunks.sort(key=lambda x: x.get('distance', 1e9))
+
             return similar_chunks[:self.max_retrieval_results]
 
         except Exception as e:

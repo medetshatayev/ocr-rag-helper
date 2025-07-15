@@ -1,42 +1,61 @@
-#from fastapi import FastAPI
-#from fastapi.middleware.cors import CORSMiddleware
+# from typing import List, Dict
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+import uuid
+import os
+import logging
+from pydantic import BaseModel
+from rag_system import RAGSystem
 
-#app = FastAPI(title="Document RAG API")
+logger = logging.getLogger(__name__)
 
-# Set up CORS middleware to allow requests from the frontend
-#app.add_middleware(
+# FastAPI application instance
+app = FastAPI(title="Document RAG API")
+
+# Allow requests from any origin (adjust if you need stricter CORS)
+app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins to avoid CORS issues
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-#@app.get("/", summary="Check API status")
+# Instantiate RAG system and prepare upload directory
+rag_system = RAGSystem()
+UPLOAD_DIR = "uploaded_files"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Root route
+@app.get("/", summary="Check API status")
 def read_root():
     return {"status": "ok"}
 
-# Add these imports to api_main.py
-#import uuid
-#import os
-#from fastapi import UploadFile, File, HTTPException
-#from fastapi.responses import FileResponse
-#from rag_system import RAGSystem
-
-#rag_system = RAGSystem()
-#UPLOAD_DIR = "uploaded_files"
-#os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-#@app.post("/upload", summary="Upload and process a document")
+# Upload endpoint
+@app.post("/upload", summary="Upload and process a document")
 async def upload_document(file: UploadFile = File(...)):
     supported_extensions = rag_system.document_processor.supported_extensions
+    # Attempt to determine file extension – fall back to Content-Type when the filename is empty or malformed.
     file_extension = os.path.splitext(file.filename)[1].lower()
 
     if file_extension not in supported_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type '{file_extension}'. Supported types: {', '.join(sorted(supported_extensions))}"
-        )
+        # Infer extension from Content-Type header for common types
+        content_type_map = {
+            "application/pdf": ".pdf",
+            "text/plain": ".txt",
+            "text/markdown": ".md",
+            "application/json": ".json",
+        }
+        inferred_ext = content_type_map.get(file.content_type, "")
+
+        if inferred_ext and inferred_ext in supported_extensions:
+            file_extension = inferred_ext
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported or unknown file type. Filename extension: '{file_extension or 'none'}', Content-Type: '{file.content_type}'"
+            )
 
     document_id = str(uuid.uuid4())
     saved_file_path = os.path.join(UPLOAD_DIR, f"{document_id}{file_extension}")
@@ -71,7 +90,8 @@ async def upload_document(file: UploadFile = File(...)):
 
     return {"document_id": document_id, "filename": file.filename}
 
-#@app.get("/files/{document_id}", summary="Download an uploaded file")
+# Download endpoint for original file (optional)
+@app.get("/files/{document_id}", summary="Download an uploaded file")
 async def get_file(document_id: str):
     # Attempt to locate the file with any supported extension
     for ext in rag_system.document_processor.supported_extensions:
@@ -85,14 +105,13 @@ async def get_file(document_id: str):
 
     raise HTTPException(status_code=404, detail="File not found.")
 
-# Add these imports to api_main.py
-from pydantic import BaseModel
-
+# Pydantic model for chat endpoint
 class ChatRequest(BaseModel):
     query: str
     document_id: str
 
-#@app.post("/chat", summary="Get an answer from the RAG system")
+# Chat endpoint (RAG-based QA)
+@app.post("/chat", summary="Get an answer from the RAG system")
 async def chat(request: ChatRequest):
     try:
         # Generate a response using the RAG system
