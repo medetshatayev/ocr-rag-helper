@@ -1,10 +1,10 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+#from fastapi import FastAPI
+#from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Document RAG API")
+#app = FastAPI(title="Document RAG API")
 
 # Set up CORS middleware to allow requests from the frontend
-app.add_middleware(
+#app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins to avoid CORS issues
     allow_credentials=True,
@@ -12,22 +12,22 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-@app.get("/", summary="Check API status")
+#@app.get("/", summary="Check API status")
 def read_root():
     return {"status": "ok"}
 
 # Add these imports to api_main.py
-import uuid
-import os
-from fastapi import UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
-from rag_system import RAGSystem
+#import uuid
+#import os
+#from fastapi import UploadFile, File, HTTPException
+#from fastapi.responses import FileResponse
+#from rag_system import RAGSystem
 
-rag_system = RAGSystem()
-UPLOAD_DIR = "uploaded_files"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+#rag_system = RAGSystem()
+#UPLOAD_DIR = "uploaded_files"
+#os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-@app.post("/upload", summary="Upload and process a document")
+#@app.post("/upload", summary="Upload and process a document")
 async def upload_document(file: UploadFile = File(...)):
     supported_extensions = rag_system.document_processor.supported_extensions
     file_extension = os.path.splitext(file.filename)[1].lower()
@@ -71,7 +71,7 @@ async def upload_document(file: UploadFile = File(...)):
 
     return {"document_id": document_id, "filename": file.filename}
 
-@app.get("/files/{document_id}", summary="Download an uploaded file")
+#@app.get("/files/{document_id}", summary="Download an uploaded file")
 async def get_file(document_id: str):
     # Attempt to locate the file with any supported extension
     for ext in rag_system.document_processor.supported_extensions:
@@ -92,7 +92,7 @@ class ChatRequest(BaseModel):
     query: str
     document_id: str
 
-@app.post("/chat", summary="Get an answer from the RAG system")
+#@app.post("/chat", summary="Get an answer from the RAG system")
 async def chat(request: ChatRequest):
     try:
         # Generate a response using the RAG system
