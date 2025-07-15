@@ -292,8 +292,8 @@ def sidebar_content():
         stats = st.session_state.rag_system.get_database_stats()
         
         if "error" not in stats:
-            st.sidebar.write(f"**Total documents:** {stats.get('total_documents', 0)}")
-            st.sidebar.write(f"**Unique sources:** {stats.get('unique_sources', 0)}")
+            # Display only count of unique documents
+            st.sidebar.write(f"**Unique documents:** {stats.get('unique_sources', 0)}")
         else:
             st.sidebar.error("Error loading stats")
     

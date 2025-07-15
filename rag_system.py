@@ -311,8 +311,19 @@ class RAGSystem:
             return []
     
     def generate_response(self, query: str, document_id: str, chat_history: List[Dict] = None) -> Dict:
-        """Generate a response using RAG."""
-        context_chunks = self.search_similar(query=query, document_id=document_id)
+        """Generate a response using RAG with optional query rewriting."""
+
+        # 1) Rewrite the query into a stand-alone form if previous turns are provided
+        rewritten_query = query
+        if chat_history:
+            try:
+                rewritten_query = self._rewrite_query(query, chat_history)
+                logger.info(f"Rewritten query: '{rewritten_query}' (from '{query}')")
+            except Exception as e:
+                logger.warning(f"Query rewriting failed, falling back to original query: {e}")
+
+        # 2) Retrieve relevant chunks
+        context_chunks = self.search_similar(query=rewritten_query, document_id=document_id)
         
         if not context_chunks:
             return {"answer": "I could not find any relevant information in the document to answer your question.", "sources": []}
@@ -354,6 +365,15 @@ DOCUMENT CONTEXT:
             
             answer = response.choices[0].message.content
             
+            # Build sources list unless the model says no relevant information
+            fallback_phrases = [
+                "i could not find any relevant information",
+                "does not contain information"
+            ]
+            lower_answer = answer.lower()
+            if any(p in lower_answer for p in fallback_phrases):
+                return {"answer": answer, "sources": []}
+
             sources = []
             for chunk in context_chunks:
                 metadata = chunk.get('metadata', {})
@@ -363,7 +383,7 @@ DOCUMENT CONTEXT:
                 }
                 if source_info not in sources:
                     sources.append(source_info)
-            
+
             return {"answer": answer, "sources": sources}
             
         except Exception as e:
@@ -458,3 +478,36 @@ DOCUMENT CONTEXT:
         except Exception as e:
             logger.error(f"Error resetting database: {str(e)}")
             return {"status": "error", "message": str(e)} 
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _rewrite_query(self, user_query: str, chat_history: List[Dict]) -> str:
+        """Rewrite a follow-up question into a stand-alone search query using the last few turns."""
+
+        # Keep only the last 6 turns for brevity
+        relevant_history = chat_history[-6:]
+        history_text = "\n".join(
+            f"{msg['role'].capitalize()}: {msg['content']}" for msg in relevant_history
+        )
+
+        prompt = (
+            "You are an assistant that reformulates follow-up questions into a self-contained, clear search query.\n"
+            "Conversation so far:\n"
+            f"{history_text}\n\n"
+            "Follow-up question: \"" + user_query + "\"\n"
+            "Rewrite the follow-up question so that it can be understood without the conversation context.\n"
+            "Return ONLY the rewritten question."
+        )
+
+        response = self.openai_client.chat.completions.create(
+            model=self.chat_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=500
+        )
+
+        rewritten = response.choices[0].message.content.strip()
+        # Guard against empty response
+        return rewritten if rewritten else user_query 
