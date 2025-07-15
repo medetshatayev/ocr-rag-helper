@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Optional, Tuple
+from uuid import uuid4  # For generating unique fallback IDs
 from pathlib import Path
 
 # Patch for sqlite3 if pysqlite3-binary is installed
@@ -208,9 +209,21 @@ class RAGSystem:
                 batch_metadatas = []
                 
                 for chunk in batch_chunks:
-                    chunk_id = f"{chunk['metadata'].get('source', 'unknown')}_{chunk['metadata'].get('chunk_id', 'unknown')}"
-                    batch_ids.append(chunk_id.replace('\\', '/').replace(' ', '_').replace(':', '_'))
+                    # Determine a unique identifier for this chunk.
+                    # Priority: explicit chunk_id, then table_id (for tables), otherwise auto-generated UUID.
+                    meta = chunk['metadata']
+                    raw_chunk_id = (
+                        meta.get('chunk_id') or
+                        meta.get('table_id') or
+                        f"auto_{uuid4()}"
+                    )
+
+                    # Combine with source to make the final document ID and sanitize it.
+                    chunk_id = f"{meta.get('source', 'unknown')}_{raw_chunk_id}"
+                    sanitized_id = chunk_id.replace('\\', '/').replace(' ', '_').replace(':', '_')
+                    batch_ids.append(sanitized_id)
                     
+                    # Attach/update document_id in metadata
                     metadata = chunk['metadata']
                     metadata['document_id'] = document_id
                     

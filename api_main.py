@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="OCR RAG Helper API")
+app = FastAPI(title="Document RAG API")
 
 # Set up CORS middleware to allow requests from the frontend
 app.add_middleware(
@@ -25,15 +25,20 @@ from rag_system import RAGSystem
 
 rag_system = RAGSystem()
 UPLOAD_DIR = "uploaded_files"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-@app.post("/upload", summary="Upload and process a PDF")
-async def upload_pdf(file: UploadFile = File(...)):
-    if file.content_type != 'application/pdf':
-        raise HTTPException(status_code=400, detail="Invalid file type. Only PDFs are accepted.")
-    
+@app.post("/upload", summary="Upload and process a document")
+async def upload_document(file: UploadFile = File(...)):
+    supported_extensions = rag_system.document_processor.supported_extensions
+    file_extension = os.path.splitext(file.filename)[1].lower()
+
+    if file_extension not in supported_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{file_extension}'. Supported types: {', '.join(sorted(supported_extensions))}"
+        )
+
     document_id = str(uuid.uuid4())
-    # Use original filename for storage to keep it, but save with document_id to prevent conflicts
-    file_extension = os.path.splitext(file.filename)[1]
     saved_file_path = os.path.join(UPLOAD_DIR, f"{document_id}{file_extension}")
 
     try:
@@ -68,15 +73,17 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.get("/files/{document_id}", summary="Download an uploaded file")
 async def get_file(document_id: str):
-    # This is a simplified lookup. In a real app, you'd track extensions.
-    # Assuming all are PDFs for now.
-    file_path = os.path.join(UPLOAD_DIR, f"{document_id}.pdf")
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found.")
-    
-    # To get the original filename, you'd ideally store it in a database.
-    # For now, we'll just serve the file directly. A better implementation is needed for original names.
-    return FileResponse(path=file_path, media_type='application/octet-stream', filename=f"{document_id}.pdf")
+    # Attempt to locate the file with any supported extension
+    for ext in rag_system.document_processor.supported_extensions:
+        file_path = os.path.join(UPLOAD_DIR, f"{document_id}{ext}")
+        if os.path.exists(file_path):
+            return FileResponse(
+                path=file_path,
+                media_type='application/octet-stream',
+                filename=f"{document_id}{ext}"
+            )
+
+    raise HTTPException(status_code=404, detail="File not found.")
 
 # Add these imports to api_main.py
 from pydantic import BaseModel

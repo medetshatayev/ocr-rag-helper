@@ -1,7 +1,7 @@
 
-# OCR RAG Helper
+# Document RAG Assistant
 
-This project is a Retrieval-Augmented Generation (RAG) system with a Streamlit-based user interface and a FastAPI backend. It's designed to process and understand documents, including PDFs with text, tables, and images (via OCR), and answer questions based on their content.
+This project is a general-purpose Retrieval-Augmented Generation (RAG) system with a Streamlit-based user interface and a FastAPI backend. It's designed to process and understand a wide variety of documents—such as PDFs, text files, markdown, code, and more—extract their content (including text, tables, and OCR for images), and answer questions based on that content.
 
 ## Key Features
 

@@ -169,7 +169,7 @@ def display_chat_message(message: Dict, message_index: int, sources: List[Dict] 
                 
                 if source_file not in grouped_sources:
                     grouped_sources[source_file] = {'pages': set()}
-                
+
                 page = source.get('page')
                 if page:
                     grouped_sources[source_file]['pages'].add(page)
@@ -259,7 +259,7 @@ def sidebar_content():
             
             if saved_count > 0:
                 st.sidebar.success(f"Successfully saved {saved_count} file(s).")
-                with st.spinner("Indexing new documents..."):
+                with st.spinner("Processing new document..."):
                     result = st.session_state.rag_system.index_directory(docs_dir)
                 st.session_state.indexing_status = result
                 st.rerun()
@@ -280,13 +280,11 @@ def sidebar_content():
     except Exception as e:
         st.sidebar.error(f"Error scanning Docs folder: {e}")
 
-    # Display indexing status
+    # Display indexing status: show errors only, suppress success message
     if st.session_state.indexing_status:
         status = st.session_state.indexing_status
-        if status["status"] == "success":
-            st.sidebar.success(f"{status['message']}")
-        else:
-            st.sidebar.error(f"{status['message']}")
+        if status.get("status") != "success":
+            st.sidebar.error(f"{status.get('message', 'Unknown error')}")
     
     st.sidebar.markdown("---")
     
