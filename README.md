@@ -10,7 +10,6 @@ This project is a general-purpose Retrieval-Augmented Generation (RAG) system wi
 - **Vector-Based Retrieval**: Uses `ChromaDB` to store document chunks as vector embeddings for efficient similarity search.
 - **Azure OpenAI Integration**: Leverages Azure OpenAI for generating high-quality embeddings and answers.
 - **User-Friendly Web Interface**: A `Streamlit` application provides an intuitive chat interface for interacting with the RAG system.
-- **API Backend**: A `FastAPI` backend exposes endpoints for uploading documents and asking questions.
 - **Flexible PDF Processing**: Includes both an advanced PDF processor (with `PyMuPDF` and `Tesseract`) and a simple, fallback processor (`pdfplumber`) for environments where full OCR capabilities are not needed or available.
 
 ## Project Structure
@@ -19,9 +18,7 @@ This project is a general-purpose Retrieval-Augmented Generation (RAG) system wi
 .
 ├── Docs/                   # Directory where uploaded documents are stored
 ├── traefik/                # Traefik configuration for reverse proxy
-├── uploaded_files/         # Directory for files uploaded via the API
 ├── vector_db/              # Directory for the ChromaDB vector store
-├── api_main.py             # FastAPI application
 ├── document_processor.py   # Handles processing of different document types
 ├── main.py                 # Main Streamlit application
 ├── pdf_processor.py        # Advanced PDF processor with OCR
@@ -65,14 +62,4 @@ This project is a general-purpose Retrieval-Augmented Generation (RAG) system wi
 
 4.  **Access the application:**
     -   **Streamlit UI**: Open your browser and go to `http://localhost:8501`
-    -   **FastAPI Docs**: Open your browser and go to `http://localhost:8000/docs`
-
-## API Usage
-
-The application includes a FastAPI backend with the following key endpoints:
-
--   `POST /upload`: Upload a PDF file for processing.
--   `POST /chat`: Ask a question about an uploaded document.
--   `GET /files/{document_id}`: Download an uploaded file.
-
-You can find detailed information about the API and test the endpoints by visiting the automatically generated documentation at `http://localhost:8000/docs`. 
+    -   **FastAPI Docs**: Open your browser and go to `http://localhost:8000/docs` 

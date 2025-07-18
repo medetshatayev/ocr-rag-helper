@@ -225,11 +225,10 @@ def sidebar_content():
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
 
-    # File uploader – key changes whenever we increment uploader_key, clearing previous selection
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload Documents",
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Document",
         type=uploader_types,
-        accept_multiple_files=True,
+        accept_multiple_files=False,
         key=f"docs_uploader_{st.session_state.uploader_key}",
         help=f"Supported file types: {', '.join(ext.upper() for ext in supported_extensions)}"
     )
@@ -238,45 +237,50 @@ def sidebar_content():
     if "saved_file_ids" not in st.session_state:
         st.session_state.saved_file_ids = set()
 
-    if uploaded_files:
-        new_files_to_save = []
-        current_file_ids = set()
-        
-        for f in uploaded_files:
-            file_id = f"{f.name}-{f.size}"
-            current_file_ids.add(file_id)
-            if file_id not in st.session_state.saved_file_ids:
-                new_files_to_save.append(f)
-        
-        if new_files_to_save:
-            saved_count = 0
-            for uploaded_file in new_files_to_save:
-                try:
-                    file_path = os.path.join(docs_dir, uploaded_file.name)
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    
-                    file_id = f"{uploaded_file.name}-{uploaded_file.size}"
-                    st.session_state.saved_file_ids.add(file_id)
-                    saved_count += 1
-                except Exception as e:
-                    st.sidebar.error(f"Error saving {uploaded_file.name}: {e}")
-            
-            if saved_count > 0:
-                st.sidebar.success(f"Successfully saved {saved_count} file(s).")
+    if "processing_file" not in st.session_state:
+        st.session_state.processing_file = None
+
+    # Check for upload cancellation
+    if st.session_state.processing_file and not uploaded_file:
+        file_path = os.path.join(docs_dir, st.session_state.processing_file)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            st.sidebar.info(f"Upload cancelled: Removed {st.session_state.processing_file}")
+        st.session_state.processing_file = None
+        st.session_state.saved_file_ids.discard(f"{st.session_state.processing_file}-size_placeholder")  # Adjust if needed
+        st.rerun()
+
+    if uploaded_file:
+        file_id = f"{uploaded_file.name}-{uploaded_file.size}"
+        if file_id not in st.session_state.saved_file_ids:
+            try:
+                file_path = os.path.join(docs_dir, uploaded_file.name)
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                st.session_state.processing_file = uploaded_file.name
+                st.session_state.saved_file_ids.add(file_id)
+                st.sidebar.success(f"Successfully saved {uploaded_file.name}.")
+                
                 with st.spinner("Processing new document..."):
-                    result = st.session_state.rag_system.index_directory(docs_dir)
+                    result = st.session_state.rag_system.index_file(
+                        file_path=file_path,
+                        document_id="dir_Docs",
+                        original_filename=uploaded_file.name
+                    )
                 st.session_state.indexing_status = result
-                # Increment key to reset uploader widget on next run
-                st.session_state.uploader_key += 1
-                st.rerun()
+                st.session_state.processing_file = None
+                
+            except Exception as e:
+                st.sidebar.error(f"Error saving {uploaded_file.name}: {e}")
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                st.session_state.processing_file = None
         
-        # Sync session state with uploader
-        st.session_state.saved_file_ids.intersection_update(current_file_ids)
-
-    # (Optional) Skip displaying the list of stored documents—they are tracked internally
-    # If you wish to restore the file listing, re-enable the block below.
-
+        # Always reset uploader after interaction
+        st.session_state.uploader_key += 1
+        st.rerun()
+    
     # Display indexing status: show errors only, suppress success message
     if st.session_state.indexing_status:
         status = st.session_state.indexing_status
@@ -285,17 +289,17 @@ def sidebar_content():
     
     st.sidebar.markdown("---")
     
-    # Database Statistics
-    st.sidebar.subheader("Library Stats")
-    
+    # List all files in Docs/
+    st.sidebar.subheader("Library Documents")
     if st.session_state.rag_system:
-        stats = st.session_state.rag_system.get_database_stats()
-        
-        if "error" not in stats:
-            # Display only count of unique documents
-            st.sidebar.write(f"**Unique documents:** {stats.get('unique_sources', 0)}")
+        docs_files = [f.name for f in Path(docs_dir).iterdir() if f.is_file()]
+        if docs_files:
+            for file in docs_files:
+                st.sidebar.write(f"- {file}")
         else:
-            st.sidebar.error("Error loading stats")
+            st.sidebar.write("No documents in library.")
+    else:
+        st.sidebar.write("RAG system not initialized.")
     
     st.sidebar.markdown("---")
     
