@@ -48,7 +48,7 @@ class RAGSystem:
         self.max_retrieval_results = int(os.getenv("MAX_RETRIEVAL_RESULTS", "10"))
         # Threshold for maximum cosine distance (lower = more similar). Chunks with higher distance are ignored.
         # Typical cosine-distance of 0.3–0.4 works well; make it configurable.
-        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.2"))
+        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.15"))
         
         # Initialize ChromaDB
         self._init_vector_db()
@@ -371,7 +371,7 @@ DOCUMENT CONTEXT:
             sources = [{'source': src} for src in sorted(unique_sources)]
 
             cited_filenames = set()
-            page_pattern = re.compile(r'\(([^,]+?)\s*,\s*page\s*([\d\s,-]+)\.?\s*\)', re.IGNORECASE)
+            page_pattern = re.compile(r'\(([^,]+?)\s*,\s*pages?\s*([\d\s,-]+)\.?\s*\)', re.IGNORECASE)
             for match in page_pattern.findall(answer):
                 filename, pages = match
                 # Normalize filename by taking the base name, in case a path is included
