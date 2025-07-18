@@ -3,6 +3,8 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from uuid import uuid4  # For generating unique fallback IDs
 from pathlib import Path
+from collections import defaultdict
+import re
 
 # Patch for sqlite3 if pysqlite3-binary is installed
 try:
@@ -43,10 +45,10 @@ class RAGSystem:
         # Configuration
         self.embedding_model = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
         self.chat_model = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
-        self.max_retrieval_results = int(os.getenv("MAX_RETRIEVAL_RESULTS", "5"))
+        self.max_retrieval_results = int(os.getenv("MAX_RETRIEVAL_RESULTS", "10"))
         # Threshold for maximum cosine distance (lower = more similar). Chunks with higher distance are ignored.
         # Typical cosine-distance of 0.3–0.4 works well; make it configurable.
-        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
+        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.2"))
         
         # Initialize ChromaDB
         self._init_vector_db()
@@ -258,18 +260,15 @@ class RAGSystem:
     
     def search_similar(self, query: str, document_id: str, n_results: int = None) -> List[Dict]:
         """Search for similar documents using vector similarity."""
-        # The user wants to get 10 sources and then filter to the top 5
-        n_results_to_fetch = 10
+        n_results_to_fetch = self.max_retrieval_results
         
         try:
-            # Generate query embedding
             response = self.openai_client.embeddings.create(
                 model=self.embedding_model,
                 input=[query]
             )
             query_embedding = response.data[0].embedding
             
-            # Query ChromaDB
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results_to_fetch,
@@ -281,27 +280,14 @@ class RAGSystem:
                 logger.info("No similar documents found in vector search.")
                 return []
             
-            # Process results safely
             similar_chunks = []
             for i in range(len(results['ids'][0])):
-                distance = results['distances'][0][i]
-                if distance <= self.similarity_threshold:
-                    similar_chunks.append({
-                        "content": results['documents'][0][i],
-                        "metadata": results['metadatas'][0][i] or {},
-                        "distance": distance
-                    })
+                similar_chunks.append({
+                    "content": results['documents'][0][i],
+                    "metadata": results['metadatas'][0][i] or {},
+                    "distance": results['distances'][0][i]
+                })
 
-            # If nothing met the threshold, fall back to unfiltered results
-            if not similar_chunks:
-                for i in range(len(results['ids'][0])):
-                    similar_chunks.append({
-                        "content": results['documents'][0][i],
-                        "metadata": results['metadatas'][0][i] or {},
-                        "distance": results['distances'][0][i]
-                    })
-
-            # Sort by distance and limit to max results
             similar_chunks.sort(key=lambda x: x.get('distance', 1e9))
 
             return similar_chunks[:self.max_retrieval_results]
@@ -313,7 +299,6 @@ class RAGSystem:
     def generate_response(self, query: str, document_id: str, chat_history: List[Dict] = None) -> Dict:
         """Generate a response using RAG with optional query rewriting."""
 
-        # 1) Rewrite the query into a stand-alone form if previous turns are provided
         rewritten_query = query
         if chat_history:
             try:
@@ -322,15 +307,16 @@ class RAGSystem:
             except Exception as e:
                 logger.warning(f"Query rewriting failed, falling back to original query: {e}")
 
-        # 2) Retrieve relevant chunks
         context_chunks = self.search_similar(query=rewritten_query, document_id=document_id)
         
         if not context_chunks:
             return {"answer": "I could not find any relevant information in the document to answer your question.", "sources": []}
         
-        context = "\n\n---\n\n".join([chunk['content'] for chunk in context_chunks])
+        context = "\n\n---\n\n".join(
+            f"From {chunk['metadata'].get('source', 'Unknown')} (page {chunk['metadata'].get('page', 'N/A')}):\n{chunk['content']}"
+            for chunk in context_chunks
+        )
         
-        # Create a system prompt
         system_prompt = f"""
 You are an intelligent assistant designed to answer questions based on a provided document.
 Your task is to synthesize information from the 'DOCUMENT CONTEXT' section to answer the user's 'QUERY'.
@@ -339,7 +325,7 @@ When you form your answer, you MUST adhere to the following rules:
 2.  If the context does not contain the answer, state clearly: "The provided document does not contain information on this topic."
 3.  Be concise and directly address the user's query.
 4.  Do not repeat the user's query in your response.
-5.  Include citations from the source document, referencing the page. For example: (page 3).
+5.  For every piece of information you use from the context, you MUST include an inline citation with the document name (filename only, no path) and page number in this exact format: (filename.ext, page X). If multiple pages from the same document are used, cite each relevant page. Failure to cite every used piece of information will result in an invalid response. Do not list sources separately; citations must be inline.
 
 DOCUMENT CONTEXT:
 ---
@@ -347,13 +333,16 @@ DOCUMENT CONTEXT:
 ---
 """
         
-        # Prepare conversation history
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": f"QUERY: {query}"})
 
-        # 3. Generate the response
+        total_chars = sum(len(m['content']) for m in messages)
+        while total_chars > 400000 and len(messages) > 2:
+            removed = messages.pop(1)
+            total_chars -= len(removed['content'])
+
         try:
             logger.info("Generating response from OpenAI...")
             response = self.openai_client.chat.completions.create(
@@ -364,8 +353,7 @@ DOCUMENT CONTEXT:
             )
             
             answer = response.choices[0].message.content
-            
-            # Build sources list unless the model says no relevant information
+
             fallback_phrases = [
                 "i could not find any relevant information",
                 "does not contain information"
@@ -374,17 +362,27 @@ DOCUMENT CONTEXT:
             if any(p in lower_answer for p in fallback_phrases):
                 return {"answer": answer, "sources": []}
 
-            sources = []
+            unique_sources = set()
             for chunk in context_chunks:
                 metadata = chunk.get('metadata', {})
-                source_info = {
-                    'source': metadata.get('source', 'N/A'),
-                    'page': metadata.get('page', 'N/A'),
-                }
-                if source_info not in sources:
-                    sources.append(source_info)
+                src = metadata.get('source', 'N/A')
+                unique_sources.add(src)
 
-            return {"answer": answer, "sources": sources}
+            sources = [{'source': src} for src in sorted(unique_sources)]
+
+            cited_filenames = set()
+            page_pattern = re.compile(r'\(([^,]+?)\s*,\s*page\s*([\d\s,-]+)\.?\s*\)', re.IGNORECASE)
+            for match in page_pattern.findall(answer):
+                filename, pages = match
+                # Normalize filename by taking the base name, in case a path is included
+                filename = Path(filename.strip()).name
+                cited_filenames.add(filename.lower())
+
+            filtered_sources = [
+                s for s in sources if Path(s['source']).name.lower() in cited_filenames
+            ]
+
+            return {"answer": answer, "sources": filtered_sources}
             
         except Exception as e:
             logger.error(f"Error generating response from OpenAI: {str(e)}")
@@ -486,12 +484,15 @@ DOCUMENT CONTEXT:
     def _rewrite_query(self, user_query: str, chat_history: List[Dict]) -> str:
         """Rewrite a follow-up question into a stand-alone search query using the last few turns."""
 
-        # Keep only the last 6 turns for brevity
-        relevant_history = chat_history[-6:]
-        history_text = "\n".join(
-            f"{msg['role'].capitalize()}: {msg['content']}" for msg in relevant_history
-        )
-
+        relevant_history = chat_history[:]
+        while relevant_history:
+            history_text = "\n".join(
+                f"{msg['role'].capitalize()}: {msg['content']}" for msg in relevant_history
+            )
+            if len(history_text) <= 8000:
+                break
+            relevant_history.pop(0)
+        
         prompt = (
             "You are an assistant that reformulates follow-up questions into a self-contained, clear search query.\n"
             "Conversation so far:\n"
@@ -509,5 +510,4 @@ DOCUMENT CONTEXT:
         )
 
         rewritten = response.choices[0].message.content.strip()
-        # Guard against empty response
         return rewritten if rewritten else user_query 

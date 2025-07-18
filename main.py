@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import List, Dict
 from dotenv import load_dotenv
+import mimetypes
 
 from rag_system import RAGSystem
 
@@ -119,6 +120,13 @@ def initialize_session_state():
     
     if "api_key_valid" not in st.session_state:
         st.session_state.api_key_valid = False
+    
+    if "processing_file" not in st.session_state:
+        st.session_state.processing_file = None
+    if "clear_error" not in st.session_state:
+        st.session_state.clear_error = None
+    if "clear_error_time" not in st.session_state:
+        st.session_state.clear_error_time = None
 
 def check_api_key():
     """Check if Azure OpenAI API key is configured."""
@@ -159,52 +167,34 @@ def display_chat_message(message: Dict, message_index: int, sources: List[Dict] 
         </div>
         """, unsafe_allow_html=True)
         
-        # Display sources for assistant messages
         if not is_user and sources:
-            grouped_sources = {}
-            for source in sources:
-                source_file = source.get('source')
-                if not source_file:
-                    continue
-                
-                if source_file not in grouped_sources:
-                    grouped_sources[source_file] = {'pages': set()}
-
-                page = source.get('page')
-                if page:
-                    grouped_sources[source_file]['pages'].add(page)
-
             with st.expander("Sources", expanded=False):
-                unique_source_files = list(grouped_sources.items())[:5]
-
-                for i, (file_name, data) in enumerate(unique_source_files):
-                    file_path = Path(file_name)
+                for i, source_info in enumerate(sources[:5]):
+                    file_name = source_info.get('source')
+                    if not file_name:
+                        continue
                     
-                    pages = sorted(list(data['pages']))
-                    pages_str = f"<strong>Page(s):</strong> {', '.join(map(str, pages))}" if pages else ""
+                    file_path = Path("Docs") / file_name
                     
                     st.markdown(f"""
                     <div class="source-info">
-                        <strong>Source {i+1}:</strong> {file_path.name}<br>
-                        {pages_str}
+                        <strong>Source {i+1}:</strong> {Path(file_name).name}<br>
                     </div>
                     """, unsafe_allow_html=True)
 
-                    # Add a download button for the source file
                     if file_path.exists():
                         try:
                             with open(file_path, "rb") as fp:
+                                mime = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
                                 st.download_button(
-                                    label=f"Download {file_path.name}",
+                                    label=f"Download {Path(file_name).name}",
                                     data=fp,
-                                    file_name=file_path.name,
-                                    mime=f"application/{file_path.suffix.lstrip('.')}",
-                                    key=f"download_{message_index}_{i}_{file_path.name}"
+                                    file_name=Path(file_name).name,
+                                    key=f"download_{message_index}_{i}",
+                                    mime=mime
                                 )
                         except Exception as e:
-                            st.error(f"Could not read file for download: {e}")
-                    else:
-                        st.warning(f"Source file not found: {file_path.name}")
+                            st.warning(f"Could not load file for download: {e}")
 
 def sidebar_content():
     """Render sidebar content."""
@@ -225,61 +215,55 @@ def sidebar_content():
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
 
+    is_processing = bool(st.session_state.get("processing_file"))
+
     uploaded_file = st.sidebar.file_uploader(
         "Upload Document",
         type=uploader_types,
-        accept_multiple_files=False,
-        key=f"docs_uploader_{st.session_state.uploader_key}",
-        help=f"Supported file types: {', '.join(ext.upper() for ext in supported_extensions)}"
+        key=f"uploader_{st.session_state.uploader_key}",
+        disabled=is_processing
     )
 
-    # State management for uploaded files to prevent re-saving
-    if "saved_file_ids" not in st.session_state:
-        st.session_state.saved_file_ids = set()
-
-    if "processing_file" not in st.session_state:
-        st.session_state.processing_file = None
-
-    # Check for upload cancellation
-    if st.session_state.processing_file and not uploaded_file:
-        file_path = os.path.join(docs_dir, st.session_state.processing_file)
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            st.sidebar.info(f"Upload cancelled: Removed {st.session_state.processing_file}")
-        st.session_state.processing_file = None
-        st.session_state.saved_file_ids.discard(f"{st.session_state.processing_file}-size_placeholder")  # Adjust if needed
-        st.rerun()
+    if is_processing:
+        st.sidebar.info(f"Processing {st.session_state.processing_file}... Please wait.")
 
     if uploaded_file:
         file_id = f"{uploaded_file.name}-{uploaded_file.size}"
         if file_id not in st.session_state.saved_file_ids:
             try:
+                docs_dir = "./Docs"
+                os.makedirs(docs_dir, exist_ok=True)
+                
                 file_path = os.path.join(docs_dir, uploaded_file.name)
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 
                 st.session_state.processing_file = uploaded_file.name
                 st.session_state.saved_file_ids.add(file_id)
-                st.sidebar.success(f"Successfully saved {uploaded_file.name}.")
                 
-                with st.spinner("Processing new document..."):
-                    result = st.session_state.rag_system.index_file(
-                        file_path=file_path,
-                        document_id="dir_Docs",
-                        original_filename=uploaded_file.name
-                    )
-                st.session_state.indexing_status = result
-                st.session_state.processing_file = None
+                st.rerun()
                 
             except Exception as e:
                 st.sidebar.error(f"Error saving {uploaded_file.name}: {e}")
-                if os.path.exists(file_path):
-                    os.remove(file_path)
                 st.session_state.processing_file = None
-        
-        # Always reset uploader after interaction
-        st.session_state.uploader_key += 1
-        st.rerun()
+
+    if is_processing:
+        try:
+            docs_dir = "./Docs"
+            file_path = os.path.join(docs_dir, st.session_state.processing_file)
+            if os.path.exists(file_path):
+                result = st.session_state.rag_system.index_file(
+                    file_path=file_path,
+                    document_id="dir_Docs",
+                    original_filename=st.session_state.processing_file
+                )
+                st.session_state.indexing_status = result
+            else:
+                st.session_state.indexing_status = {"status": "error", "message": f"File {st.session_state.processing_file} not found."}
+        finally:
+            st.session_state.processing_file = None
+            st.session_state.uploader_key += 1
+            st.rerun()
     
     # Display indexing status: show errors only, suppress success message
     if st.session_state.indexing_status:
@@ -299,7 +283,7 @@ def sidebar_content():
         else:
             st.sidebar.write("No documents in library.")
     else:
-        st.sidebar.write("RAG system not initialized.")
+        st.sidebar.write("System not initialized.")
     
     st.sidebar.markdown("---")
     
@@ -311,23 +295,27 @@ def sidebar_content():
         st.rerun()
     
     if st.sidebar.button("Clear Library", use_container_width=True):
+        errors = []
         if st.session_state.rag_system:
             # Clear database
             db_clear_result = st.session_state.rag_system.clear_database()
-            if db_clear_result["status"] == "success":
-                st.sidebar.success("Library database cleared!")
-                st.session_state.indexing_status = None
+            if db_clear_result["status"] != "success":
+                errors.append(f"Database Clear Error: {db_clear_result['message']}")
             else:
-                st.sidebar.error(f"Error clearing database: {db_clear_result['message']}")
-            
+                st.session_state.indexing_status = None
+
             # Clear Docs folder
             docs_clear_result = st.session_state.rag_system.clear_docs_folder(docs_dir)
-            if docs_clear_result["status"] == "success":
-                st.sidebar.success("Source files deleted!")
-                # Reset saved file IDs to allow re-uploading
-                st.session_state.saved_file_ids = set()
+            if docs_clear_result["status"] != "success":
+                errors.append(f"Docs Folder Clear Error: {docs_clear_result['message']}")
             else:
-                st.sidebar.error(f"Error deleting files: {docs_clear_result['message']}")
+                st.session_state.saved_file_ids = set()
+
+        if errors:
+            st.session_state.clear_error = "\\n".join(errors)
+            st.session_state.clear_error_time = time.time()
+        else:
+            st.session_state.clear_error = None
         
         st.rerun()
 
