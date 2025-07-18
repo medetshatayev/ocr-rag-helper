@@ -46,9 +46,6 @@ class RAGSystem:
         self.embedding_model = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
         self.chat_model = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
         self.max_retrieval_results = int(os.getenv("MAX_RETRIEVAL_RESULTS", "10"))
-        # Threshold for maximum cosine distance (lower = more similar). Chunks with higher distance are ignored.
-        # Typical cosine-distance of 0.3–0.4 works well; make it configurable.
-        self.similarity_threshold = float(os.getenv("SIMILARITY_THRESHOLD", "0.15"))
         
         # Initialize ChromaDB
         self._init_vector_db()
@@ -325,7 +322,7 @@ When you form your answer, you MUST adhere to the following rules:
 2.  If the context does not contain the answer, state clearly: "The provided document does not contain information on this topic."
 3.  Be concise and directly address the user's query.
 4.  Do not repeat the user's query in your response.
-5.  For every piece of information you use from the context, you MUST include an inline citation with the document name (filename only, no path) and page number in this exact format: (filename.ext, page X). If multiple pages from the same document are used, cite each relevant page. Failure to cite every used piece of information will result in an invalid response. Do not list sources separately; citations must be inline.
+5.  You MUST cite all information used from the context. Citations must be inline and in this exact format: (filename.ext, page X) for a single page or (filename.ext, pages X-Y) for a range of pages. Use the exact filename from the context. This is a strict requirement.
 
 DOCUMENT CONTEXT:
 ---
@@ -370,13 +367,20 @@ DOCUMENT CONTEXT:
 
             sources = [{'source': src} for src in sorted(unique_sources)]
 
+            unique_context_filenames = {Path(s['source']).name for s in sources}
+            single_source_mode = len(unique_context_filenames) == 1
+            the_only_filename = next(iter(unique_context_filenames)) if single_source_mode else None
+
             cited_filenames = set()
-            page_pattern = re.compile(r'\(([^,]+?)\s*,\s*pages?\s*([\d\s,-]+)\.?\s*\)', re.IGNORECASE)
+            page_pattern = re.compile(r'\((?:([^,]+?)\s*,\s*)?pages?\s*([\d\s,-]+)\.?\s*\)', re.IGNORECASE)
             for match in page_pattern.findall(answer):
                 filename, pages = match
-                # Normalize filename by taking the base name, in case a path is included
-                filename = Path(filename.strip()).name
-                cited_filenames.add(filename.lower())
+                
+                if filename:
+                    normalized_filename = Path(filename.strip()).name
+                    cited_filenames.add(normalized_filename.lower())
+                elif single_source_mode:
+                    cited_filenames.add(the_only_filename.lower())
 
             filtered_sources = [
                 s for s in sources if Path(s['source']).name.lower() in cited_filenames

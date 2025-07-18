@@ -127,6 +127,8 @@ def initialize_session_state():
         st.session_state.clear_error = None
     if "clear_error_time" not in st.session_state:
         st.session_state.clear_error_time = None
+    if "saved_file_ids" not in st.session_state:
+        st.session_state.saved_file_ids = set()
 
 def check_api_key():
     """Check if Azure OpenAI API key is configured."""
