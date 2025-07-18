@@ -35,10 +35,15 @@ class RAGSystem:
         self.persist_directory = persist_directory
         self.document_processor = DocumentProcessor()
         
-        # Initialize Azure OpenAI client
-        self.openai_client = AzureOpenAI(
+        # Initialize separate Azure OpenAI clients for chat and embeddings
+        self.chat_client = AzureOpenAI(
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        )
+        self.embedding_client = AzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version="2024-02-01",  # Use a stable, recent version for embeddings
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
         )
         
@@ -200,7 +205,7 @@ class RAGSystem:
                 batch_chunks = chunks[i:i + batch_size]
                 batch_texts = [chunk['content'] for chunk in batch_chunks]
                 
-                response = self.openai_client.embeddings.create(
+                response = self.embedding_client.embeddings.create(
                     model=self.embedding_model,
                     input=batch_texts
                 )
@@ -260,12 +265,14 @@ class RAGSystem:
         n_results_to_fetch = self.max_retrieval_results
         
         try:
-            response = self.openai_client.embeddings.create(
+            # Generate query embedding
+            response = self.embedding_client.embeddings.create(
                 model=self.embedding_model,
                 input=[query]
             )
             query_embedding = response.data[0].embedding
             
+            # Query ChromaDB
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results_to_fetch,
@@ -342,7 +349,7 @@ DOCUMENT CONTEXT:
 
         try:
             logger.info("Generating response from OpenAI...")
-            response = self.openai_client.chat.completions.create(
+            response = self.chat_client.chat.completions.create(
                 model=self.chat_model,
                 messages=messages,
                 temperature=0.1,
@@ -506,7 +513,7 @@ DOCUMENT CONTEXT:
             "Return ONLY the rewritten question."
         )
 
-        response = self.openai_client.chat.completions.create(
+        response = self.chat_client.chat.completions.create(
             model=self.chat_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
