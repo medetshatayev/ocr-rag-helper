@@ -11,10 +11,11 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ocr_rag_ui.rule=Host(`yourdomain.com`)"
-      - "traefik.http.routers.ocr_rag_ui.entrypoints=websecure"
+      - "traefik.http.routers.ocr_rag_ui.rule=Host(`bonneville.farmon.omadligrouphq.com`)"
+      - "traefik.http.routers.ocr_rag_ui.entryPoints=https"
       - "traefik.http.routers.ocr_rag_ui.tls=true"
-      - "traefik.http.middlewares.ocr_rag_ui-strip.stripprefix.prefixes=/static"
+      - "traefik.http.routers.ocr_rag_ui.tls.certresolver=coolify"
+      - "traefik.http.middlewares.ocr_rag_ui-strip.stripPrefix.prefixes=/static"
       - "traefik.http.routers.ocr_rag_ui.middlewares=ocr_rag_ui-strip@docker"
       - "traefik.http.services.ocr_rag_ui.loadbalancer.server.port=8501"
       - "traefik.http.services.ocr_rag_ui.loadbalancer.healthcheck.path=/healthz"
