@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ocr_rag_ui.rule=Host(`yourdomain.com`)"
+      - "traefik.http.routers.ocr_rag_ui.rule=Host(yourdomain.com)"
       - "traefik.http.routers.ocr_rag_ui.entryPoints=https"
       - "traefik.http.routers.ocr_rag_ui.tls=true"
       - "traefik.http.routers.ocr_rag_ui.tls.certresolver=coolify"
